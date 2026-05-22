@@ -1,5 +1,5 @@
 {
-  "family": "bem13-app",
+  "family": "ENV_PLACEHOLDER-bem13-task",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
@@ -25,7 +25,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/bem13-app",
+          "awslogs-group": "/ecs/ENV_PLACEHOLDER-bem13",
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }
