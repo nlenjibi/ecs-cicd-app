@@ -15,14 +15,13 @@ on:
 permissions:
   contents: read
 
-# Cancel in-progress runs on PRs; never cancel a deploy mid-flight.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   JAVA_VERSION: '21'
-  AWS_REGION: us-east-1
+  AWS_REGION: eu-west-1
   ECR_REPOSITORY: bem13-java-app
 
 jobs:
@@ -42,11 +41,9 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # No `clean` — fresh runner is always clean. -T 1C uses one thread per core.
       - name: Build and test
         run: mvn verify -B --no-transfer-progress -T 1C
 
-      # Share the JAR so the deploy job can skip Maven entirely.
       - name: Upload JAR
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -64,7 +61,6 @@ jobs:
           retention-days: 7
 
   # ── Job 2: Build Docker image & Push to ECR ─────────────────────
-  # Only runs on branch pushes, and only after tests pass.
   build-and-push:
     name: Build & Push to ECR
     needs: test
@@ -74,12 +70,11 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write   # required for OIDC
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      # Download pre-built JAR — no Maven needed here.
       - uses: actions/download-artifact@v4
         with:
           name: app-jar
@@ -95,68 +90,30 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Resolve tags and environment
-        id: meta
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ENV_NAME: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+      - name: Set image URI
+        id: image
         run: |
-          SHORT_SHA="${GITHUB_SHA::8}"
-          echo "env_name=${ENV_NAME}"                                                  >> "$GITHUB_OUTPUT"
-          echo "short_sha=${SHORT_SHA}"                                                >> "$GITHUB_OUTPUT"
-          echo "sha_tag=${REGISTRY}/${ECR_REPOSITORY}:${ENV_NAME}-${SHORT_SHA}"       >> "$GITHUB_OUTPUT"
-          echo "latest_tag=${REGISTRY}/${ECR_REPOSITORY}:${ENV_NAME}-latest"          >> "$GITHUB_OUTPUT"
-
-      # Single API call replaces three separate list-exports calls.
-      - name: Fetch CloudFormation exports
-        id: cfn
-        env:
-          ENV_NAME: ${{ steps.meta.outputs.env_name }}
-        run: |
-          EXPORTS=$(aws cloudformation list-exports \
-            --query 'Exports[*].{Name:Name,Value:Value}' \
-            --output json)
-          get() { echo "$EXPORTS" | jq -r ".[] | select(.Name==\"$1\") | .Value"; }
-          echo "exec_role=$(get "${ENV_NAME}-bem13-EcsTaskExecutionRoleArn")" >> "$GITHUB_OUTPUT"
-          echo "task_role=$(get "${ENV_NAME}-bem13-EcsTaskRoleArn")"          >> "$GITHUB_OUTPUT"
-          echo "bucket=$(get "${ENV_NAME}-bem13-ArtifactsBucket")"            >> "$GITHUB_OUTPUT"
+          REPO="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}"
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
 
       # S3 upload happens BEFORE ECR push to prevent EventBridge race condition.
       - name: Upload CodeDeploy artifacts to S3
         env:
-          ENV_NAME: ${{ steps.meta.outputs.env_name }}
-          IMAGE_URI: ${{ steps.meta.outputs.latest_tag }}
-          EXEC_ROLE: ${{ steps.cfn.outputs.exec_role }}
-          TASK_ROLE: ${{ steps.cfn.outputs.task_role }}
-          BUCKET: ${{ steps.cfn.outputs.bucket }}
+          ENV_NAME: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
         run: |
-          sed "s|<IMAGE1_NAME>|${IMAGE_URI}|g; \
-               s|EXECUTION_ROLE_ARN_PLACEHOLDER|${EXEC_ROLE}|g; \
-               s|TASK_ROLE_ARN_PLACEHOLDER|${TASK_ROLE}|g; \
+          sed "s|<IMAGE1_NAME>|${{ steps.image.outputs.repo }}:latest|g; \
+               s|EXECUTION_ROLE_ARN_PLACEHOLDER|${{ secrets.ECS_EXEC_ROLE_ARN }}|g; \
+               s|TASK_ROLE_ARN_PLACEHOLDER|${{ secrets.ECS_TASK_ROLE_ARN }}|g; \
                s|ENV_PLACEHOLDER|${ENV_NAME}|g" \
             codedeploy/taskdef.json > /tmp/taskdef.json
           cp codedeploy/appspec.yaml /tmp/appspec.yaml
           cd /tmp && zip -q deploy-artifacts.zip taskdef.json appspec.yaml
-          aws s3 cp deploy-artifacts.zip "s3://${BUCKET}/${ENV_NAME}/deploy-artifacts.zip"
+          aws s3 cp deploy-artifacts.zip "s3://${{ secrets.ARTIFACTS_BUCKET }}/${ENV_NAME}/deploy-artifacts.zip"
 
-      - uses: docker/setup-buildx-action@v3
-
-      # BuildKit builds once and pushes both tags in a single layer upload.
-      # GHA cache persists layers between runs — cold builds only on first push
-      # or when base image/deps change.
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.meta.outputs.sha_tag }}
-            ${{ steps.meta.outputs.latest_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.repositoryUrl }}
+        run: |
+          docker build -t "${{ steps.image.outputs.repo }}" .
+          docker push "${{ steps.image.outputs.repo }}"
 
       - name: Summary
-        run: echo "::notice title=Image pushed::${{ steps.meta.outputs.sha_tag }}"
+        run: echo "::notice title=Image pushed::${{ steps.image.outputs.repo }}:latest"
