@@ -83,12 +83,14 @@ jobs:
 
       - name: Upload CodeDeploy artifacts to S3
         env:
-          ENV_NAME: ${{ github.ref_name == 'main' && 'prod' || github.ref_name }}
+          ENV_NAME: ${{ secrets.ENV_NAME }}
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ secrets.REPO_NAME }}:latest
+          EXEC_ROLE: ${{ secrets.ECS_EXEC_ROLE_ARN }}
+          TASK_ROLE: ${{ secrets.ECS_TASK_ROLE_ARN }}
         run: |
           sed "s|<IMAGE1_NAME>|${IMAGE_URI}|g; \
-               s|EXECUTION_ROLE_ARN_PLACEHOLDER|${{ secrets.ECS_EXEC_ROLE_ARN }}|g; \
-               s|TASK_ROLE_ARN_PLACEHOLDER|${{ secrets.ECS_TASK_ROLE_ARN }}|g; \
+               s|EXECUTION_ROLE_ARN_PLACEHOLDER|${EXEC_ROLE}|g; \
+               s|TASK_ROLE_ARN_PLACEHOLDER|${TASK_ROLE}|g; \
                s|ENV_PLACEHOLDER|${ENV_NAME}|g" \
             codedeploy/taskdef.json > /tmp/taskdef.json
           cp codedeploy/appspec.yaml /tmp/appspec.yaml
