@@ -1,9 +1,9 @@
-
 FROM amazoncorretto:21-alpine
 
 WORKDIR /app
 
 COPY target/bem13app-0.0.1-SNAPSHOT.jar app.jar
+
 
 EXPOSE 8080
 

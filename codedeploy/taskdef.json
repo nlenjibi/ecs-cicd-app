@@ -1,11 +1,11 @@
 {
-  "family": "ENV_PLACEHOLDER-bem13-task",
+  "family": "prod-bem13-task",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "executionRoleArn": "EXECUTION_ROLE_ARN_PLACEHOLDER",
-  "taskRoleArn": "TASK_ROLE_ARN_PLACEHOLDER",
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/prod-bem13-ecs-exec-role",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/prod-bem13-ecs-task-role",
   "containerDefinitions": [
     {
       "name": "app",
@@ -16,16 +16,16 @@
           "protocol": "tcp"
         }
       ],
-      "environment": [
+      "secrets": [
         {
           "name": "SPRING_PROFILES_ACTIVE",
-          "value": "ENV_PLACEHOLDER"
+          "valueFrom": "/bem13/prod/app/spring-profile"
         }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/ENV_PLACEHOLDER-bem13",
+          "awslogs-group": "/ecs/prod-bem13",
           "awslogs-region": "eu-west-1",
           "awslogs-stream-prefix": "ecs"
         }
